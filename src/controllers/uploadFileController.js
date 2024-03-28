@@ -2,12 +2,15 @@
 
 import UploadController from './uploadController.js'
 
+import AWS from 'aws-sdk'
+import { v4 as uuidv4 } from 'uuid'
 import multer from 'multer'
-import axios from 'axios'
-import fs from 'fs/promises'
-import { lookup } from 'mime-types'
+import { promises as fs, createReadStream } from 'fs'
 import config from '../../config/index.js'
 import logger from '../utils/logger.js'
+import { postFileRequest } from '../utils/publishRequestAPI.js'
+
+AWS.config.update({ region: config.aws.region })
 
 const upload = multer({ dest: 'uploads/' })
 
@@ -19,37 +22,33 @@ class UploadFileController extends UploadController {
 
   async post (req, res, next) {
     this.resetValidationErrorMessage()
-    if (req.file !== undefined) {
-      req.body.datafile = req.file
 
-      // log the file name, type and size as an object
-      logger.info('file uploaded:', { type: 'fileUploaded', name: req.file.originalname, mimetype: req.file.mimetype, size: req.file.size })
-
-      const localValidationResult = UploadFileController.localValidateFile({
-        ...req.file,
-        filePath: req.file.path,
-        fileName: req.file.originalname
-      })
-      if (!localValidationResult) {
-        this.validationError('localValidationError', '', null, req)
-      } else {
-        try {
-          const apiValidationResult = await this.apiValidateFile({
-            ...req.file,
-            filePath: req.file.path,
-            fileName: req.file.originalname,
-            ...this.getBaseFormData(req)
-          })
-          this.handleValidationResult(apiValidationResult, req)
-        } catch (error) {
-          this.handleApiError(error, req)
-        }
-      }
+    if (req.file === undefined) {
+      return
     }
+
+    // log the file name, type and size as an object
+    logger.info('file uploaded:', { type: 'fileUploaded', name: req.file.originalname, mimetype: req.file.mimetype, size: req.file.size })
+
+    const localValidationResult = UploadFileController.localValidateFile({
+      ...req.file,
+      filePath: req.file.path,
+      fileName: req.file.originalname
+    })
+
+    if (!localValidationResult) {
+      this.validationError('localValidationError', '', null, req)
+      return
+    }
+
+    const uploadedFilename = await UploadFileController.uploadFileToS3(req.file)
 
     // delete the file from the uploads folder
     if (req.file && req.file.path) { fs.unlink(req.file.path) }
 
+    const id = await postFileRequest({ ...this.getBaseFormData(req), originalFilename: req.file.name, uploadedFilename })
+
+    req.body.request_id = id
     super.post(req, res, next)
   }
 
@@ -63,16 +62,27 @@ class UploadFileController extends UploadController {
             UploadFileController.fileMimeTypeMatchesExtension(datafile)
   }
 
-  async apiValidateFile (datafile) {
-    const { filePath, fileName, dataset, dataSubject, organisation, sessionId, geomType } = datafile
+  /*
+    This function should upload a file to s3, saving the file with a UUID as the filename. then return the UUID
+  */
+  static async uploadFileToS3 (datafile, signedURL) {
+    const s3 = new AWS.S3()
+    const fileStream = createReadStream(datafile)
+    const uuid = uuidv4()
 
-    const formData = this.constructBaseFormData({ dataset, dataSubject, organisation, sessionId, geomType })
-    const file = new Blob([await fs.readFile(filePath)], { type: lookup(filePath) })
-    formData.append('upload_file', file, fileName)
+    const params = {
+      Bucket: config.aws.bucket, // replace 'your-bucket-name' with your actual bucket name
+      Key: uuid,
+      Body: fileStream
+    }
 
-    const result = await axios.post(this.apiRoute, formData, { timeout: config.api.requestTimeout })
-
-    return result.data
+    try {
+      await s3.upload(params).promise()
+      return uuid
+    } catch (error) {
+      console.log('Error uploading file: ', error)
+      throw error
+    }
   }
 
   static extensionIsValid (datafile) {
