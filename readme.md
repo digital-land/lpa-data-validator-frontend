@@ -6,6 +6,7 @@ Project is a web application for TODO
 
 Below is a list of dependencies needed to develop, run and deploy the application.
 
+<!-- TEMPLATE -->
 <!--div class="" data-type="Dependency">
   Dependencies have the following format:
   <pre>
@@ -21,10 +22,11 @@ Below is a list of dependencies needed to develop, run and deploy the applicatio
 - AWS:
     - **Description**: Various cloud infrastructure products
     - **Used for**: Running the application and associated services.
+    - **Contact**: Infrastructure Team @ MHCLG
 - Redis
     - **Description**: An in memory key-value store
     - **Used for**: storing session info
-    - **Contact**: string? // email or username or full name of person responsible
+    - **Contact**: Infrastructure Team @ MHCLG
 - Local Authorities API (external dependency)
     - **Description**: TODO
     - **Used for**: TODO
@@ -35,11 +37,15 @@ Below is a list of dependencies needed to develop, run and deploy the applicatio
 - Github
     - **Description**: Source code hosting
     - **Used for**: Storing the code and as a dependency source of internal packages.
-    - **Contact**: TODO
-- Smartlook
+    - **Contact**: Infrastructure Team @ MHCLG
+- [Smartlook](https://smartlook.com)
     - **Description**: Web Analytics
     - **Used for**: Collecting _anonymised_ data on website usage
-    - **Contact**: TODO
+    - **Contact**: Providers team @ MHCLG
+- [Sentry](https://sentry.io)
+    - **Description**: Application monitoring service
+    - **Used for**: Monotoring warnings and errors.
+    - **Contact**: Infrastructure Team @ MHCLG
 
 ## Software
 
@@ -75,19 +81,19 @@ Below is a list of dependencies needed to develop, run and deploy the applicatio
     ```
 
 ## Running the application
+
+The application picks up one of the configs in `config` directory, 
+depeding on `NODE_ENV` environment variable (set to 'production' by default).
+
 - Run the application
     ```
     npm run start
     ```
-- Run the application in watch mode
-    ```
-    npm run start
-    ```
-- run the application, using a local api
+- run the application, using a local API
     ```
     npm run start:local
     ```
-- run the application, using a local api in watch mode
+- run the application, using a local API in watch mode
     ```
     npm run start:local:watch
     ```
