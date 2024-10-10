@@ -1,17 +1,15 @@
 import performanceDbApi from '../services/performanceDbApi.js'
-import logger from '../utils/logger.js'
-import { types } from '../utils/logging.js'
-import { fetchDatasetInfo, fetchEntityCount, fetchLatestResource, fetchOrgInfo, isResourceIdInParams, logPageError, takeResourceIdFromParams, validateQueryParams } from './common.middleware.js'
+import { fetchDatasetInfo, fetchEntityCount, fetchIssueEntitiesCount, fetchIssues, fetchLatestResource, fetchOrgInfo, formatErrorSummaryParams, isResourceIdNotInParams, logPageError, reformatIssuesToBeByEntryNumber, takeResourceIdFromParams, validateQueryParams } from './common.middleware.js'
 import { fetchIf, parallel, renderTemplate } from './middleware.builders.js'
 import * as v from 'valibot'
 import { pagination } from '../utils/pagination.js'
 
-export const IssueDetailsQueryParams = v.object({
+export const IssueDetailsQueryParams = v.strictObject({
   lpa: v.string(),
   dataset: v.string(),
   issue_type: v.string(),
   issue_field: v.string(),
-  pageNumber: v.optional(v.string()),
+  pageNumber: v.string(),
   resourceId: v.optional(v.string())
 })
 
@@ -21,57 +19,9 @@ const validateIssueDetailsQueryParams = validateQueryParams.bind({
 
 /**
  *
- * Middleware. Updates `req` with `issues`.
- *
- * Requires `resourceId` in request params or request (in that order).
- *
- * @param {*} req
- * @param {*} res
- * @param {*} next
- */
-async function fetchIssues (req, res, next) {
-  const { dataset: datasetId, issue_type: issueType, issue_field: issueField } = req.params
-  const { resource: resourceId } = req.resource
-  if (!resourceId) {
-    logger.debug('fetchIssues(): missing resourceId', { type: types.App, params: req.params, resource: req.resource })
-    throw Error('fetchIssues: missing resourceId')
-  }
-
-  try {
-    const issues = await performanceDbApi.getIssues({ resource: resourceId, issueType, issueField }, datasetId)
-    req.issues = issues
-    next()
-  } catch (error) {
-    next(error)
-  }
-}
-
-/**
- *
- * Middleware. Updates `req` with `issues`.
- *
- * Requires `issues` in request.
- *
- * @param {*} req
- * @param {*} res
- * @param {*} next
- */
-async function reformatIssuesToBeByEntryNumber (req, res, next) {
-  const { issues } = req
-  const issuesByEntryNumber = issues.reduce((acc, current) => {
-    acc[current.entry_number] = acc[current.entry_number] || []
-    acc[current.entry_number].push(current)
-    return acc
-  }, {})
-  req.issuesByEntryNumber = issuesByEntryNumber
-  next()
-}
-
-/**
- *
  * Middleware. Updates `req` with `entryData`
  *
- * Requires `pageNumber`, `dataset` and
+ * Requires `dataset` and `entryNumber`
  *
  * @param {*} req
  * @param {*} res
@@ -79,40 +29,15 @@ async function reformatIssuesToBeByEntryNumber (req, res, next) {
  *
  */
 async function fetchEntry (req, res, next) {
-  const { dataset: datasetId, pageNumber } = req.params
-  const { issuesByEntryNumber } = req
-  const pageNum = pageNumber ? parseInt(pageNumber) : 1
-  req.pageNumber = pageNum
-
-  // look at issue Entries and get the index of that entry - 1
-
-  const entityNum = Object.values(issuesByEntryNumber)[pageNum - 1][0].entry_number
+  const { dataset: datasetId } = req.params
+  const { entryNumber } = req
 
   req.entryData = await performanceDbApi.getEntry(
     req.resource.resource,
-    entityNum,
+    entryNumber,
     datasetId
   )
-  req.entryNumber = entityNum
-  next()
-}
 
-/**
- *
- * Middleware. Updates `req` with `issueEntitiesCount` which is the count of entities that have issues.
- *
- * Requires `req.resource.resource`
- *
- * @param {*} req
- * @param {*} res
- * @param {*} next
- */
-async function fetchIssueEntitiesCount (req, res, next) {
-  const { dataset: datasetId, issue_type: issueType, issue_field: issueField } = req.params
-  const { resource: resourceId } = req.resource
-  console.assert(resourceId, 'missng resource id')
-  const issueEntitiesCount = await performanceDbApi.getEntitiesWithIssuesCount({ resource: resourceId, issueType, issueField }, datasetId)
-  req.issueEntitiesCount = parseInt(issueEntitiesCount)
   next()
 }
 
@@ -153,9 +78,10 @@ const getIssueField = (text, html, classes) => {
  * @param {*} row
  * @returns {{key: {text: string}, value: { html: string}, classes: string}}
  */
-const processEntryRow = (issueType, issuesByEntryNumber, row) => {
+const processEntryRow = (issueType, issuesByEntryNumber = {}, row) => {
   const { entry_number: entryNumber } = row
   console.assert(entryNumber, 'precessEntryRow(): entry_number not in row')
+
   let hasError = false
   let issueIndex
   if (issuesByEntryNumber[entryNumber]) {
@@ -178,36 +104,61 @@ const processEntryRow = (issueType, issuesByEntryNumber, row) => {
   return getIssueField(row.field, valueHtml, classes)
 }
 
-/***
- * Middleware. Updates req with `templateParams`
+/**
+ * Middleware. Extracts the entry number from the page number in the request.
+ *
+ * @param {object} req - The request object
+ * @param {object} res - The response object
+ * @param {function} next - The next middleware function
+ *
+ * @throws {Error} If the page number cannot be parsed as an integer
+ * @throws {Error} If the entry number is not found (404)
  */
-export function prepareIssueDetailsTemplateParams (req, res, next) {
-  const { entryData, pageNumber, issueEntitiesCount, issuesByEntryNumber, entryNumber, entityCount: entityCountRow } = req
-  const { lpa, dataset: datasetId, issue_type: issueType, issue_field: issueField } = req.params
-  const { entity_count: entityCount } = entityCountRow ?? { entity_count: 0 }
+export function getEntryNumberFromPageNumber (req, res, next) {
+  const { issuesByEntryNumber } = req
+  const { pageNumber } = req.params
 
-  let errorHeading
-  let issueItems
-
-  const BaseSubpath = `/organisations/${lpa}/${datasetId}/${issueType}/${issueField}/`
-
-  if (Object.keys(issuesByEntryNumber).length < entityCount) {
-    errorHeading = performanceDbApi.getTaskMessage({ issue_type: issueType, num_issues: issueEntitiesCount, entityCount, field: issueField }, true)
-    issueItems = Object.entries(issuesByEntryNumber).map(([entryNumber, issues], i) => {
-      const pageNum = i + 1
-      return {
-        html: performanceDbApi.getTaskMessage({ issue_type: issueType, num_issues: 1, field: issueField }) + ` in record ${entryNumber}`,
-        href: `${BaseSubpath}${pageNum}`
-      }
-    })
-  } else {
-    issueItems = [{
-      html: performanceDbApi.getTaskMessage({ issue_type: issueType, num_issues: issueEntitiesCount, entityCount, field: issueField }, true)
-    }]
+  const pageNumberAsInt = parseInt(pageNumber)
+  if (isNaN(pageNumberAsInt)) {
+    const error = new Error('page number could not be parsed as an integer')
+    error.status = 400
+    return next(error)
   }
 
+  const issuesByEntryNumberIndex = pageNumberAsInt - 1
+  const pageNumberToEntryNumberMap = Object.keys(issuesByEntryNumber)
+
+  if (issuesByEntryNumberIndex < 0 || issuesByEntryNumberIndex >= pageNumberToEntryNumberMap.length) {
+    const error = new Error('not found')
+    error.status = 404
+    return next(error)
+  }
+
+  req.entryNumber = pageNumberToEntryNumberMap[issuesByEntryNumberIndex]
+  next()
+}
+
+/**
+ * Middleware. Prepares template parameters for the issue details page.
+ *
+ * @param {object} req - The request object
+ * @param {object} res - The response object (not used)
+ * @param {function} next - The next middleware function
+ *
+ * @summary Extracts relevant data from the request and organizes it into a template parameters object.
+ * @description This middleware function prepares the template parameters for the issue details page.
+ * It extracts the entry data, issue entities count, issues by entry number, error summary, and other relevant data
+ * from the request, and organizes it into a template parameters object that can be used to render the page.
+ */
+export function prepareIssueDetailsTemplateParams (req, res, next) {
+  const { entryData, issueEntitiesCount, issuesByEntryNumber, errorSummary, entryNumber } = req
+  const { lpa, dataset: datasetId, issue_type: issueType, issue_field: issueField, pageNumber: pageNumberString } = req.params
+  const pageNumber = parseInt(pageNumberString)
+
+  const BaseSubpath = `/organisations/${lpa}/${datasetId}/${issueType}/${issueField}/entry/`
+
   const fields = entryData.map((row) => processEntryRow(issueType, issuesByEntryNumber, row))
-  const entityIssues = Object.values(issuesByEntryNumber)[pageNumber - 1] || []
+  const entityIssues = issuesByEntryNumber[entryNumber] || []
   for (const issue of entityIssues) {
     if (!fields.find((field) => field.key.text === issue.field)) {
       const errorMessage = issue.message || issueType
@@ -228,14 +179,19 @@ export function prepareIssueDetailsTemplateParams (req, res, next) {
     geometries
   }
 
-  const paginationObj = {}
+  const paginationObj = {
+    items: []
+  }
+
+  const entryNumbers = Object.keys(issuesByEntryNumber)
+
   if (pageNumber > 1) {
     paginationObj.previous = {
       href: `${BaseSubpath}${pageNumber - 1}`
     }
   }
 
-  if (pageNumber < issueEntitiesCount) {
+  if (pageNumber < entryNumbers.length) {
     paginationObj.next = {
       href: `${BaseSubpath}${pageNumber + 1}`
     }
@@ -262,13 +218,12 @@ export function prepareIssueDetailsTemplateParams (req, res, next) {
   req.templateParams = {
     organisation: req.orgInfo,
     dataset: req.dataset,
-    errorHeading,
-    issueItems,
+    errorSummary,
     entry,
     issueType,
+    issueField,
     pagination: paginationObj,
-    issueEntitiesCount,
-    pageNumber
+    issueEntitiesCount
   }
 
   next()
@@ -288,14 +243,16 @@ export default [
   validateIssueDetailsQueryParams,
   fetchOrgInfo,
   fetchDatasetInfo,
-  fetchIf(isResourceIdInParams, fetchLatestResource, takeResourceIdFromParams),
+  fetchIf(isResourceIdNotInParams, fetchLatestResource, takeResourceIdFromParams),
   fetchIssues,
   reformatIssuesToBeByEntryNumber,
+  getEntryNumberFromPageNumber,
   parallel([
     fetchEntry,
     fetchEntityCount,
     fetchIssueEntitiesCount
   ]),
+  formatErrorSummaryParams,
   prepareIssueDetailsTemplateParams,
   getIssueDetails,
   logPageError

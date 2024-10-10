@@ -3,6 +3,8 @@ import * as v from 'valibot'
 
 import performanceDbApi from '../../../src/services/performanceDbApi.js'
 import { getIssueDetails, IssueDetailsQueryParams, prepareIssueDetailsTemplateParams } from '../../../src/middleware/issueDetails.middleware.js'
+import mocker from '../../utils/mocker.js'
+import { DatasetNameField, errorSummaryField, OrgField } from '../../../src/routes/schemas.js'
 
 vi.mock('../../../src/services/performanceDbApi.js')
 
@@ -13,12 +15,12 @@ describe('issueDetails.middleware.js', () => {
     {
       field: 'start-date',
       value: '02-02-2022',
-      entry_number: 1
+      entry_number: 10
     }
   ]
   const issues = [
     {
-      entry_number: 0,
+      entry_number: 10,
       field: 'start-date',
       value: '02-02-2022'
     }
@@ -32,33 +34,40 @@ describe('issueDetails.middleware.js', () => {
         issue_type: 'test-issue-type',
         issue_field: 'test-issue-field',
         resourceId: 'test-resource-id',
-        entityNumber: '1'
+        pageNumber: '1'
       }
       const req = {
         params: requestParams,
         // middleware supplies the below
-        entryNumber: 1,
         entityCount: { entity_count: 3 },
         issueEntitiesCount: 1,
-        pageNumber: 1,
         orgInfo,
         dataset,
         entryData,
         issues,
+        entryNumber: 10,
         resource: { resource: requestParams.resourceId },
         issuesByEntryNumber: {
-          1: [
+          10: [
             {
               field: 'start-date',
               value: '02-02-2022',
               line_number: 1,
-              entry_number: 1,
+              entry_number: 10,
               message: 'mock message',
               issue_type: 'mock type'
             }
           ]
+        },
+        errorSummary: {
+          heading: 'mockHeading',
+          items: [
+            {
+              html: 'mock task message 1 in record 10',
+              href: '/organisations/test-lpa/test-dataset/test-issue-type/test-issue-field/entry/10'
+            }
+          ]
         }
-        // errorHeading -- set  in prepare* fn
       }
       v.parse(IssueDetailsQueryParams, req.params)
 
@@ -79,15 +88,9 @@ describe('issueDetails.middleware.js', () => {
           dataset: 'mock-dataset',
           collection: 'mock-collection'
         },
-        errorHeading: 'mockMessageFor: 0',
-        issueItems: [
-          {
-            html: 'mock task message 1 in record 1',
-            href: '/organisations/test-lpa/test-dataset/test-issue-type/test-issue-field/1'
-          }
-        ],
+        errorSummary: req.errorSummary,
         entry: {
-          title: 'entry: 1',
+          title: 'entry: 10',
           fields: [
             {
               key: { text: 'start-date' },
@@ -98,16 +101,16 @@ describe('issueDetails.middleware.js', () => {
           geometries: []
         },
         issueType: 'test-issue-type',
+        issueField: 'test-issue-field',
         pagination: {
           items: [{
             current: true,
-            href: '/organisations/test-lpa/test-dataset/test-issue-type/test-issue-field/1',
+            href: '/organisations/test-lpa/test-dataset/test-issue-type/test-issue-field/entry/1',
             number: 1,
             type: 'number'
           }]
         },
-        issueEntitiesCount: 1,
-        pageNumber: 1
+        issueEntitiesCount: 1
       }
 
       expect(req.templateParams).toEqual(expectedTempalteParams)
@@ -118,12 +121,12 @@ describe('issueDetails.middleware.js', () => {
         {
           field: 'start-date',
           value: '02-02-2022',
-          entry_number: 1
+          entry_number: 10
         },
         {
           field: 'geometry',
           value: 'POINT(0 0)',
-          entry_number: 1
+          entry_number: 10
         }
       ]
       const requestParams = {
@@ -132,34 +135,38 @@ describe('issueDetails.middleware.js', () => {
         issue_type: 'test-issue-type',
         issue_field: 'test-issue-field',
         resourceId: 'test-resource-id',
-        entityNumber: '1'
+        pageNumber: '1'
       }
       const req = {
         params: requestParams,
         // middleware supplies the below
-        entryNumber: 1,
+        entryNumber: 10,
         entityCount: { entity_count: 3 },
         issueEntitiesCount: 1,
-        pageNumber: 1,
         orgInfo,
         dataset,
         entryData,
         issues,
         resource: { resource: requestParams.resourceId },
+        errorSummary: {
+          heading: 'mock heading',
+          items: [
+            {
+              html: 'mock task message 1 in record 10',
+              href: '/organisations/test-lpa/test-dataset/test-issue-type/test-issue-field/entry/10'
+            }
+          ]
+        },
         issuesByEntryNumber: {
-          1: [
+          10: [
             {
               field: 'start-date',
-              value: '02-02-2022',
-              line_number: 1,
-              entry_number: 1,
-              message: 'mock message',
-              issue_type: 'mock type'
+              message: 'mock message'
             }
           ]
         }
-        // errorHeading -- set  in prepare* fn
       }
+
       v.parse(IssueDetailsQueryParams, req.params)
 
       issues.forEach(issue => {
@@ -179,15 +186,9 @@ describe('issueDetails.middleware.js', () => {
           dataset: 'mock-dataset',
           collection: 'mock-collection'
         },
-        errorHeading: 'mockMessageFor: 0',
-        issueItems: [
-          {
-            html: 'mock task message 1 in record 1',
-            href: '/organisations/test-lpa/test-dataset/test-issue-type/test-issue-field/1'
-          }
-        ],
+        errorSummary: req.errorSummary,
         entry: {
-          title: 'entry: 1',
+          title: 'entry: 10',
           fields: [
             {
               key: { text: 'start-date' },
@@ -207,16 +208,16 @@ describe('issueDetails.middleware.js', () => {
           geometries: ['POINT(0 0)']
         },
         issueType: 'test-issue-type',
+        issueField: 'test-issue-field',
         pagination: {
           items: [{
             current: true,
-            href: '/organisations/test-lpa/test-dataset/test-issue-type/test-issue-field/1',
+            href: '/organisations/test-lpa/test-dataset/test-issue-type/test-issue-field/entry/1',
             number: 1,
             type: 'number'
           }]
         },
-        issueEntitiesCount: 1,
-        pageNumber: 1
+        issueEntitiesCount: 1
       }
 
       expect(req.templateParams).toEqual(expectedTemplateParams)
@@ -225,24 +226,15 @@ describe('issueDetails.middleware.js', () => {
 
   describe('getIssueDetails', () => {
     it('should call render using the provided template params and correct view', () => {
+      const mockedOrg = mocker(OrgField)
+      const mockedDataset = mocker(DatasetNameField)
+      const mockErrorSummary = mocker(errorSummaryField)
+
       const req = {
         templateParams: {
-          organisation: {
-            name: 'mock lpa',
-            organisation: 'ORG'
-          },
-          dataset: {
-            name: 'mock dataset',
-            dataset: 'mock-dataset',
-            collection: 'mock-collection'
-          },
-          errorHeading: 'mockMessageFor: 0',
-          issueItems: [
-            {
-              html: 'mock task message 1 in record 1',
-              href: '/organisations/test-lpa/test-dataset/test-issue-type/test-issue-field/1'
-            }
-          ],
+          organisation: mockedOrg,
+          dataset: mockedDataset,
+          errorSummary: mockErrorSummary,
           entry: {
             title: 'entry: 1',
             fields: [
@@ -264,6 +256,7 @@ describe('issueDetails.middleware.js', () => {
             geometries: ['POINT(0 0)']
           },
           issueType: 'test-issue-type',
+          issueField: 'test-issue-field',
           pagination: {
             items: [{
               current: true,

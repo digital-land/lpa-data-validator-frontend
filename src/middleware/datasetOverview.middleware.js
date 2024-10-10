@@ -1,7 +1,6 @@
-import { fetchDatasetInfo, fetchLatestResource, fetchLpaDatasetIssues, fetchOrgInfo, isResourceAccessible, isResourceIdInParams, logPageError, takeResourceIdFromParams } from './common.middleware.js'
-import { fetchOne, fetchIf, fetchMany, parallel, renderTemplate, FetchOptions } from './middleware.builders.js'
+import { fetchDatasetInfo, fetchEntityCount, fetchLatestResource, fetchLpaDatasetIssues, fetchOrgInfo, fetchSpecification, isResourceAccessible, isResourceIdNotInParams, logPageError, pullOutDatasetSpecification, takeResourceIdFromParams } from './common.middleware.js'
+import { fetchIf, fetchMany, parallel, renderTemplate, FetchOptions } from './middleware.builders.js'
 import { fetchResourceStatus } from './datasetTaskList.middleware.js'
-import performanceDbApi from '../services/performanceDbApi.js'
 
 const fetchColumnSummary = fetchMany({
   query: ({ params }) => `
@@ -31,19 +30,6 @@ const fetchColumnSummary = fetchMany({
   dataset: FetchOptions.performanceDb
 })
 
-const fetchSpecification = fetchOne({
-  query: ({ req }) => `select * from specification WHERE specification = '${req.dataset.collection}'`,
-  result: 'specification'
-})
-
-export const pullOutDatasetSpecification = (req, res, next) => {
-  const { specification } = req
-  const collectionSpecifications = JSON.parse(specification.json)
-  const datasetSpecification = collectionSpecifications.find((spec) => spec.dataset === req.dataset.dataset)
-  req.specification = datasetSpecification
-  next()
-}
-
 const fetchSources = fetchMany({
   query: ({ params }) => `
     select rhe.endpoint, rhe.endpoint_url, rhe.status, rhe.exception, rhe.resource, rhe.latest_log_entry_date, rhe.endpoint_entry_date, rhe.endpoint_end_date, rhe.resource_start_date, rhe.resource_end_date, s.documentation_url
@@ -53,12 +39,6 @@ const fetchSources = fetchMany({
     AND (rhe.resource_end_date >= current_timestamp OR rhe.resource_end_date is null)
   `,
   result: 'sources'
-})
-
-const fetchEntityCount = fetchOne({
-  query: ({ req }) => performanceDbApi.entityCountQuery(req.orgInfo.entity),
-  result: 'entityCount',
-  dataset: FetchOptions.fromParams
 })
 
 export const prepareDatasetOverviewTemplateParams = (req, res, next) => {
@@ -133,7 +113,7 @@ export default [
   parallel([
     fetchColumnSummary,
     fetchResourceStatus,
-    fetchIf(isResourceIdInParams, fetchLatestResource, takeResourceIdFromParams)
+    fetchIf(isResourceIdNotInParams, fetchLatestResource, takeResourceIdFromParams)
   ]),
   fetchIf(isResourceAccessible, fetchLpaDatasetIssues),
   fetchSpecification,
